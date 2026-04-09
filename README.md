@@ -1,1 +1,1 @@
-# sign_language_using_pycharm-opencv-
+Sign language recognition using PyCharm and OpenCV is based on computer vision and image processing. The system captures hand gestures via a camera, extracts features like shape and motion, and uses algorithms or ML models to classify gestures into meaningful signs.
