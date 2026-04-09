@@ -1,0 +1,136 @@
+import os
+import pickle
+import mediapipe as mp
+import cv2
+
+# For MediaPipe 0.10.x, we need to use the vision API
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+
+# Download the hand landmarker model if it doesn't exist
+model_path = "hand_landmarker.task"
+if not os.path.exists(model_path):
+    print("Downloading hand landmarker model (this may take a moment)...")
+    import urllib.request
+
+    model_url = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+    urllib.request.urlretrieve(model_url, model_path)
+    print("Model downloaded successfully!")
+
+# Initialize the hand detector
+base_options = python.BaseOptions(model_asset_path=model_path)
+options = vision.HandLandmarkerOptions(
+    base_options=base_options,
+    num_hands=2,
+    min_hand_detection_confidence=0.3,
+    min_hand_presence_confidence=0.3,
+    min_tracking_confidence=0.3,
+    running_mode=vision.RunningMode.IMAGE  # Explicitly set to IMAGE mode
+)
+detector = vision.HandLandmarker.create_from_options(options)
+
+DATA_DIR = './data'
+
+# Check if data directory exists
+if not os.path.exists(DATA_DIR):
+    print(f"Error: Data directory '{DATA_DIR}' not found!")
+    print("Please create the directory structure:")
+    print("  ./data/class_name/image1.jpg")
+    print("  ./data/class_name/image2.jpg")
+    print("  etc.")
+    exit(1)
+
+data = []
+labels = []
+hand_count = 0
+no_hand_count = 0
+
+print("Processing images...")
+for dir_ in os.listdir(DATA_DIR):
+    dir_path = os.path.join(DATA_DIR, dir_)
+    if not os.path.isdir(dir_path):
+        continue
+
+    print(f"\nProcessing class: {dir_}")
+
+    image_files = [f for f in os.listdir(dir_path)
+                   if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+
+    if not image_files:
+        print(f"  No image files found in {dir_}")
+        continue
+
+    for img_path in image_files:
+        img_full_path = os.path.join(DATA_DIR, dir_, img_path)
+
+        # Read image
+        img = cv2.imread(img_full_path)
+        if img is None:
+            print(f"  Warning: Could not read {img_path}")
+            continue
+
+        # Convert to RGB
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        # Convert to MediaPipe Image
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+
+        # Detect hands
+        detection_result = detector.detect(mp_image)
+
+        if detection_result.hand_landmarks:
+            hand_count += 1
+            # Process each detected hand
+            for hand_landmarks in detection_result.hand_landmarks:
+                data_aux = []
+                x_ = []
+                y_ = []
+
+                # Collect coordinates
+                for landmark in hand_landmarks:
+                    x_.append(landmark.x)
+                    y_.append(landmark.y)
+
+                # Normalize coordinates
+                min_x = min(x_)
+                min_y = min(y_)
+                for landmark in hand_landmarks:
+                    data_aux.append(landmark.x - min_x)
+                    data_aux.append(landmark.y - min_y)
+
+                data.append(data_aux)
+                labels.append(dir_)
+            print(f"  ✓ {img_path}: {len(detection_result.hand_landmarks)} hand(s) detected")
+        else:
+            no_hand_count += 1
+            print(f"  ✗ {img_path}: No hand detected")
+
+# Save the dataset
+if data:
+    output_file = 'data.pickle'
+    with open(output_file, 'wb') as f:
+        pickle.dump({'data': data, 'labels': labels}, f)
+
+    print(f"\n{'=' * 50}")
+    print(f"SUCCESS! Dataset saved to {output_file}")
+    print(f"Total samples: {len(data)}")
+    print(f"Feature vector length: {len(data[0])} (should be 42)")
+    print(f"Classes: {set(labels)}")
+    print(f"Hands detected: {hand_count}")
+    print(f"Images with no hand: {no_hand_count}")
+else:
+    print(f"\n{'=' * 50}")
+    print("ERROR: No data collected!")
+    print("Possible reasons:")
+    print("1. No hands detected in any images")
+    print("2. Images might be in the wrong format")
+    print("3. Data directory structure might be incorrect")
+    print("\nExpected structure:")
+    print("  ./data/")
+    print("    ├── peace/")
+    print("    │   ├── image1.jpg")
+    print("    │   └── image2.jpg")
+    print("    ├── thumbs_up/")
+    print("    │   ├── image1.jpg")
+    print("    │   └── image2.jpg")
+    print("    └── ...")
